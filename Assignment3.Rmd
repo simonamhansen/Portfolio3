@@ -30,6 +30,7 @@ setwd("C:/Users/simon/GoogleDrev/Uni/Methods4/Portfolios/Portfolio2")
 
 # Load package
 library(rethinking)
+library(cowplot)
 
 #Load data
 d = read.csv("Assignment3Data.csv")
@@ -39,10 +40,9 @@ d2 = d[d$Visit == 1,]
 d3 = d2[d2$ASD == 1,]
 
 # Scale variables
-d3$ADOS = d3$ADOS - mean(d3$ADOS)
-d3$VerbalIQ = d3$VerbalIQ - mean(d3$VerbalIQ)
-d3$SocialIQ = d3$SocialIQ - mean(d3$SocialIQ)
-d3$NonVerbalIQ = d3$NonVerbalIQ - mean(d3$NonVerbalIQ)
+d3$VerbalIQ = scale(d3$VerbalIQ)
+d3$SocialIQ = scale(d3$SocialIQ)
+d3$NonVerbalIQ = scale(d3$NonVerbalIQ)
 
 plot(d3$VerbalIQ, d3$ADOS)
 plot(d3$SocialIQ, d3$ADOS)
@@ -159,62 +159,222 @@ shade(ados.HPDI , ScaleNVIQ.seq)
 
 ```
 
-
-
-```{r}
-# Create a function to do this for the other 2 variables
-
-ADOS_function = function(data, model){
-  
-  # To get model results
-  results=precis(model)
-
-  # To plot the model
-  data.seq <- seq( from=-10 , to=15 , by=0.1 )
-
-  mu = link(model , data=data.frame(=data.seq) )
-  mu.mean <- apply( mu , 2 , mean )
-  mu.HPDI <- apply( mu , 2 , HPDI , prob=0.89 )
-
-  sim.ados <- sim(model , data=list(IQ=data.seq) )
-  #summarizing the distribution of the simulation
-  ados.HPDI <- apply( sim.ados , 2 , HPDI , prob=0.89 )
-
-
-  plot=alist( # plot raw data
-  plot(ADOS ~ IQ , data , col=col.alpha(rangi2,0.5)),
-  # draw MAP line
-  lines( data.seq , mu.mean ),
-  # draw HPDI region for line
-  shade(mu.HPDI , data.seq),
-  # draw PI region for simulated heights
-  shade(ados.HPDI , data.seq) )
-
-  return(results)
-  return(plot)
-
-}
-
-mSocialIQ <- map(
-alist(
-ADOS ~ dnorm(mu , sigma) ,
-mu <- a + b*SocialIQ,
-a ~ dnorm(0, 10) ,
-b ~ dnorm(0, 5) ,
-sigma ~ dunif(0, 5)
-) ,
-data=d3)
-
-ADOS_function(d3, mSocialIQ)
-
-
-```
-
 2. Do the different aspects of IQ account for different portions of the variance in ADOS? 
 2.1. Does it make sense to have all IQ measures in the same model? First write a few lines answering the question and motivating your answer, including a discussion as to what happens when you put all of them in the same model. Then build a model following your answer. If your answer is "no", you are not free, you still have to answer: are there alternative ways of answering the question?
 2.2. Build the model, assess its quality, write a few lines interpreting the results.
 
+```{r}
+dnoscale = read.csv("Assignment3Data.csv")
+
+# Subset data
+dnoscale = dnoscale[d$Visit == 1,]
+dnoscale = dnoscale[d2$ASD == 1,]
+
+dnoscale$VerbalIQ.c = dnoscale$VerbalIQ - mean(dnoscale$VerbalIQ)
+dnoscale$NonVerbalIQ.c = dnoscale$NonVerbalIQ - mean(dnoscale$NonVerbalIQ)
+dnoscale$SocialIQ.c = dnoscale$SocialIQ - mean(dnoscale$VerbalIQ)
+
+cor.test(dnoscale$VerbalIQ, dnoscale$NonVerbalIQ) # 0.67
+cor.test(dnoscale$NonVerbalIQ, dnoscale$SocialIQ) #0.37
+cor.test(dnoscale$SocialIQ, dnoscale$VerbalIQ) #0.61
+
+m_social=map(
+  alist(
+    SocialIQ ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_VerbalIQ*VerbalIQ +
+        b_NonVerbalIQ*NonVerbalIQ,
+    Intercept ~ dnorm(0,5),
+    b_VerbalIQ ~ dnorm(0,5),
+    b_NonVerbalIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_social)
+
+# Plot residuals
+mu.SIQ = coef(m_social)['Intercept'] + coef(m_social)['b_VerbalIQ']*d3$VerbalIQ + coef(m_social)['b_NonVerbalIQ']*d3$NonVerbalIQ
+m.rSIQ = d3$SocialIQ - mu.SIQ
+
+plot_SIQ = ggplot(d3, aes(y=ADOS, x= m.rSIQ)) + geom_smooth(method = 'lm') + geom_point() + xlab("SocialIQ Residuals")
+
+m_verbal=map(
+  alist(
+    VerbalIQ ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SocialIQ*SocialIQ +
+        b_NonVerbalIQ*NonVerbalIQ,
+    Intercept ~ dnorm(0,5),
+    b_SocialIQ ~ dnorm(0,5),
+    b_NonVerbalIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_verbal)
+
+# Plot residuals
+mu.VIQ = coef(m_verbal)['Intercept'] + coef(m_verbal)['b_SocialIQ']*d3$SocialIQ + coef(m_verbal)['b_NonVerbalIQ']*d3$NonVerbalIQ
+m.rVIQ = d3$VerbalIQ - mu.VIQ
+
+plot_VIQ=ggplot(d3, aes(y=ADOS, x= m.rVIQ)) + geom_smooth(method = 'lm') + geom_point() + xlab("VerbalIQ Residuals")
+
+m_NonVerbal=map(
+  alist(
+    NonVerbalIQ ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SocialIQ*SocialIQ +
+        b_VerbalIQ*VerbalIQ,
+    Intercept ~ dnorm(0,5),
+    b_SocialIQ ~ dnorm(0,5),
+    b_VerbalIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_NonVerbal)
+
+# Plot residuals
+mu.NVIQ = coef(m_NonVerbal)['Intercept'] + coef(m_NonVerbal)['b_SocialIQ']*d3$SocialIQ + coef(m_NonVerbal)['b_VerbalIQ']*d3$VerbalIQ
+m.rNVIQ = d3$NonVerbalIQ - mu.NVIQ
+
+plot_NVIQ=ggplot(d3, aes(y=ADOS, x= m.rNVIQ)) + geom_smooth(method = 'lm') + geom_point() + xlab("NonVerbalIQ Residuals")
+
+plot_grid(plot_NVIQ, plot_SIQ, plot_VIQ)
+
+# To get numeric estimate for residual
+
+d3$NVIQ_res = m.rNVIQ
+d3$VIQ_res = m.rVIQ
+d3$SIQ_res = m.rSIQ
+
+m_NonVerbal_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_NVIQ*NVIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_NVIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_NonVerbal_res)
+
+m_Verbal_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_VIQ*VIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_VIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_Verbal_res)
+
+m_Social_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SIQ*SIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_SIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_Social_res)
+
+
+glimmer(ADOS ~ SocialIQ + VerbalIQ, data=d3)
+
+m_allIQ=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SocialIQ*SocialIQ +
+        b_VerbalIQ*VerbalIQ +
+        b_NonVerbalIQ*NonVerbalIQ,
+    Intercept ~ dnorm(0,5),
+    b_SocialIQ ~ dnorm(0,5),
+    b_VerbalIQ ~ dnorm(0,5),
+    b_NonVerbalIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_allIQ)
+plot(precis(m_allIQ))
+
+# Quality check of model
+
+mu <- link( m_allIQ)
+# summarize samples across cases
+mu.mean <- apply( mu , 2 , mean )
+mu.HPDI <- apply( mu , 2 , HPDI )
+
+# simulate observations
+# again no new data, so uses original data
+ADOS.sim <- sim( m_allIQ , n=1e4 )
+ADOS.HPDI <- apply( ADOS.sim , 2 , HPDI )
+
+#plotting
+plot(mu.mean ~ d3$ADOS , col=rangi2 , ylim=range(mu.HPDI) ,
+xlab="Observed ADOS" , ylab="Predicted ADOS" )
+abline( a=0 , b=1 , lty=2 )
+for ( i in 1:nrow(d3) ) {
+lines( rep(d3$ADOS[i],2) , c(mu.HPDI[1,i],mu.HPDI[2,i]) ,
+col=rangi2 ) }
+
+```
+
+
 3. Let's now include also the TD children. Does it make sense to ask whether IQ and ADOS are related? Motivate your answer. In any case, if you wanted to build a model to answer that question, which model would you build? Run the model, assess its quality, write a few lines interpreting the results.
+
+```{r}
+
+d2=na.omit(d2)
+d2$NonVerbalIQ = scale(d2$NonVerbalIQ)
+d2$VerbalIQ = scale(d2$VerbalIQ)
+d2$SocialIQ = scale(d2$SocialIQ)
+
+# Create a model with all the children
+m_all_child=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SocialIQ*SocialIQ +
+        b_VerbalIQ*VerbalIQ +
+        b_NonVerbalIQ*NonVerbalIQ,
+    Intercept ~ dnorm(0,5),
+    b_SocialIQ ~ dnorm(0,5),
+    b_VerbalIQ ~ dnorm(0,5),
+    b_NonVerbalIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d2)
+
+precis(m_all_child)
+
+plot(precis(m_all_child))
+
+# Quality check of model
+
+mu <- link( m_all_child)
+# summarize samples across cases
+mu.mean <- apply( mu , 2 , mean )
+mu.HPDI <- apply( mu , 2 , HPDI )
+
+# simulate observations
+# again no new data, so uses original data
+ADOS.sim <- sim( m_all_child , n=1e4 )
+ADOS.HPDI <- apply( ADOS.sim , 2 , HPDI )
+
+#plotting
+plot(mu.mean ~ d2$ADOS , col=rangi2 , ylim=range(mu.HPDI) ,
+xlab="Observed ADOS" , ylab="Predicted ADOS" )
+abline( a=0 , b=1 , lty=2 )
+for ( i in 1:nrow(d2) ) {
+lines( rep(d2$ADOS[i],2) , c(mu.HPDI[1,i],mu.HPDI[2,i]) ,
+col=rangi2 ) }
+
+```
+
 
 4. Let's discuss contents:
 4.1. You have three scores for IQ, do they show shared variance? Is that the same in TD and ASD? What does that tell us about IQ?
@@ -223,3 +383,48 @@ ADOS_function(d3, mSocialIQ)
 5. Bonus questions: Including measurement errors. 
 5.1. Let's assume that ADOS has a measurement error of 1. How would you model that in any of the previous models? 
 5.2. We know that IQ has an estimated measurement error of 2.12. How would you include that? 
+
+```{r}
+# To get numeric estimate for residual
+
+d3$NVIQ_res = m.rNVIQ
+d3$VIQ_res = m.rVIQ
+d3$SIQ_res = m.rSIQ
+
+m_NonVerbal_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_NVIQ*NVIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_NVIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_NonVerbal_res)
+
+m_Verbal_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_VIQ*VIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_VIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_Verbal_res)
+
+m_Social_res=map(
+  alist(
+    ADOS ~ dnorm( mu , sigma ),
+    mu <- Intercept +
+        b_SIQ*SIQ_res,
+    Intercept ~ dnorm(0,5),
+    b_SIQ ~ dnorm(0,5),
+    sigma ~ dunif(0,10)
+), data = d3)
+
+precis(m_Social_res)
+
+```
